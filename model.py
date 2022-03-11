@@ -6,11 +6,12 @@ sys.path += ['./']
 import torch
 from torch import nn
 import transformers
-from transformers.modeling_longformer import LongformerPreTrainedModel
-from transformers import LongformerModel,RobertaModel
+from transformers import LongformerModel, RobertaModel
 if int(transformers.__version__[0]) <=3:
     from transformers.modeling_roberta import RobertaPreTrainedModel
+    from transformers.modeling_longformer import LongformerPreTrainedModel
 else:
+    from transformers.models.longformer.modeling_longformer import LongformerPreTrainedModel
     from transformers.models.roberta.modeling_roberta import RobertaPreTrainedModel
 import torch.nn.functional as F
 from torch.cuda.amp import autocast

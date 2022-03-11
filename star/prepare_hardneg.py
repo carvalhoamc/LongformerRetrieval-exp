@@ -73,9 +73,9 @@ def gen_static_hardnegs(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--data_type", choices=["passage", 'doc'], type=str, required=True)
-    parser.add_argument("--max_query_length", type=int, default=32)
-    parser.add_argument("--max_doc_length", type=int, default=512)
-    parser.add_argument("--eval_batch_size", type=int, default=128)
+    parser.add_argument("--max_query_length", type=int, default=64)
+    parser.add_argument("--max_doc_length", type=int, default=4096)
+    parser.add_argument("--eval_batch_size", type=int, default=16)
     parser.add_argument("--mode", type=str, choices=["train", "dev", "test", "lead"], required=True)
     parser.add_argument("--topk", type=int, default=200)
     parser.add_argument("--not_faiss_cuda", action="store_true")

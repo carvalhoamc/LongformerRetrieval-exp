@@ -117,6 +117,8 @@ class MyTrainingArguments(TrainingArguments):
         metadata={"help": "Number of updates steps to accumulate before performing a backward/update pass."},)
 
     learning_rate: float = field(default=1e-4, metadata={"help": "The initial learning rate for Adam."})
+    gat_type: float = field(default="none", metadata={"help": "the gat model type:none/rgat/pos"})
+    gat_learning_rate: float = field(default=2e-3, metadata={"help": "The initial learning rate of the gat part."})
     weight_decay: float = field(default=0.01, metadata={"help": "Weight decay if we apply some."})
     adam_beta1: float = field(default=0.9, metadata={"help": "Beta1 for Adam optimizer"})
     adam_beta2: float = field(default=0.999, metadata={"help": "Beta2 for Adam optimizer"})

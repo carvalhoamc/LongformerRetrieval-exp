@@ -54,7 +54,7 @@ def evaluate(args, model):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model_dir", type=str, required=True)
+    parser.add_argument("--model_path", type=str, required=True)
     parser.add_argument("--output_dir", type=str, required=True)
     parser.add_argument("--preprocess_dir", type=str, required=True)
     parser.add_argument("--mode", type=str, choices=["train", "dev", "test", "lead"], required=True)
@@ -64,6 +64,7 @@ if __name__ == "__main__":
     parser.add_argument("--pergpu_eval_batch_size", type=int, default=32)
     parser.add_argument("--no_cuda", action='store_true')
     parser.add_argument("--faiss_gpus", type=int, default=None, nargs="+")
+    parser.add_argument("--document_type", type=str, default=doc)
     args = parser.parse_args()
     logger.info(args)
 

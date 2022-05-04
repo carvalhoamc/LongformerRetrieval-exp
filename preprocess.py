@@ -617,6 +617,21 @@ def get_arguments():
         type=str,
     )
     parser.add_argument(
+        "--document_model",
+        default="roberta-base",
+        type=str,
+    )
+    parser.add_argument(
+        "--paragraph_model",
+        default="roberta-base",
+        type=str,
+    )
+    parser.add_argument(
+        "--sentence_model",
+        default="roberta-base",
+        type=str,
+    )
+    parser.add_argument(
         "--max_seq_length",
         default=4096,
         type=int,

@@ -31,13 +31,13 @@ python ./star/train.py --preprocess_dir ${preprocess_dir} --hardneg_path ${hardn
 --do_train --optimizer_str adamw --learning_rate 2e-6 --gat_learning_rate 2e-3 --output_dir #{output_model_path}
 ```
 
-##Inference
+## Inference
 Obtain the relative score between documents and queries based on different document representations(document/paragraph/sentence):
 ```
 python ./star/inference.py --mode dev  --model_path ${output_model_path} --document_type ${document_type} --topk 100
 ```
 
-##Evaluation
+## Evaluation
 Evaluate the trained model on MSMARCO dev document dataset:
 ```
 python ./msmarco_eval.py ./data/doc/preprocess/dev-qrel.tsv ./data/doc/evaluate/adore-star/dev.rank.tsv 100

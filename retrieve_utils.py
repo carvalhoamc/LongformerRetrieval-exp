@@ -16,10 +16,12 @@ def index_retrieve(index, query_embeddings, topk, batch=None):
         query_offset_base = 0
         pbar = tqdm(total=len(query_embeddings))
         nearest_neighbors = []
+        nearest_neighbors_scores = []
         while query_offset_base < len(query_embeddings):
             batch_query_embeddings = query_embeddings[query_offset_base:query_offset_base+ batch]
-            batch_nn = index.search(batch_query_embeddings, topk)[1]
+            scores, batch_nn = index.search(batch_query_embeddings, topk)
             nearest_neighbors.extend(batch_nn.tolist())
+            nearest_neighbors_scores.extend(scores)
             query_offset_base += len(batch_query_embeddings)
             pbar.update(len(batch_query_embeddings))
         pbar.close()
@@ -27,7 +29,7 @@ def index_retrieve(index, query_embeddings, topk, batch=None):
     elapsed_time = timer() - start
     elapsed_time_per_query = 1000 * elapsed_time / len(query_embeddings)
     print(f"Elapsed Time: {elapsed_time:.1f}s, Elapsed Time per query: {elapsed_time_per_query:.1f}ms")
-    return nearest_neighbors
+    return nearest_neighbors, nearest_neighbors_scores
 
 
 

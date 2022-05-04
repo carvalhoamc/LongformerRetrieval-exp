@@ -12,9 +12,10 @@ from tqdm import tqdm
 from collections import defaultdict
 from torch.utils.data import Dataset
 from typing import List
-
+import itertools
 logger = logging.getLogger(__name__)
-
+from star_tokenizer import RobertaTokenizer
+import time
 
 class TextTokenIdsCache:
     def __init__(self, data_dir, prefix):
@@ -39,7 +40,6 @@ class TextTokenIdsCache:
     def __getitem__(self, item):
         return self.ids_arr[item, :self.lengths_arr[item]]
 
-
 class SequenceDataset(Dataset):
     def __init__(self, ids_cache, max_seq_length):
         self.ids_cache = ids_cache
@@ -61,7 +61,6 @@ class SequenceDataset(Dataset):
         }
         return ret_val
 
-
 class SubsetSeqDataset:
     def __init__(self, subset: List[int], ids_cache, max_seq_length):
         self.subset = sorted(list(subset))
@@ -73,7 +72,6 @@ class SubsetSeqDataset:
     def __getitem__(self, item):
         return self.alldataset[self.subset[item]]
 
-
 def load_rel(rel_path):
     reldict = defaultdict(list)
     for line in tqdm(open(rel_path), desc=os.path.split(rel_path)[1]):
@@ -81,7 +79,6 @@ def load_rel(rel_path):
         qid, pid = int(qid), int(pid)
         reldict[qid].append((pid))
     return dict(reldict)
-    
 
 def load_rank(rank_path):
     rankdict = defaultdict(list)
@@ -91,7 +88,6 @@ def load_rank(rank_path):
         rankdict[qid].append(pid)
     return dict(rankdict)
 
-
 def pack_tensor_2D(lstlst, default, dtype, length=None):
     batch_size = len(lstlst)
     length = length if length is not None else max(len(l) for l in lstlst)
@@ -99,7 +95,6 @@ def pack_tensor_2D(lstlst, default, dtype, length=None):
     for i, l in enumerate(lstlst):
         tensor[i, :len(l)] = torch.tensor(l, dtype=dtype)
     return tensor
-
 
 def get_collate_function(max_seq_length):
     cnt = 0
@@ -120,9 +115,7 @@ def get_collate_function(max_seq_length):
         }
         ids = [x['id'] for x in batch]
         return data, ids
-    return collate_function  
-
-
+    return collate_function
 
 class TrainInbatchDataset(Dataset):
     def __init__(self, rel_file, queryids_cache, docids_cache, 
@@ -142,14 +135,16 @@ class TrainInbatchDataset(Dataset):
         passage_data = self.doc_dataset[pid]
         return query_data, passage_data
 
-
 class TrainInbatchWithHardDataset(TrainInbatchDataset):
-    def __init__(self, rel_file, rank_file, queryids_cache, 
+    def __init__(self, rel_file, rank_file, map_file, queryids_cache,
             docids_cache, hard_num,
             max_query_length, max_doc_length):
         TrainInbatchDataset.__init__(self, 
             rel_file, queryids_cache, docids_cache, 
             max_query_length, max_doc_length)
+        self.tokenizer = RobertaTokenizer.from_pretrained("roberta-base", do_lower_case=True)
+        self.map_dict = json.load(open(map_file))
+        self.hierarchical_score = json.load(score_file)
         self.rankdict = json.load(open(rank_file))
         assert hard_num > 0
         self.hard_num = hard_num
@@ -164,8 +159,18 @@ class TrainInbatchWithHardDataset(TrainInbatchDataset):
         passage_data = self.doc_dataset[pid]
         hardpids = random.sample(self.rankdict[str(qid)], self.hard_num)
         hard_passage_data = [self.doc_dataset[hardpid] for hardpid in hardpids]
-        return query_data, passage_data, hard_passage_data
-
+        sentence_span_passage = self.map_dict[pid]['sentence']
+        para_span_passage = self.map_dict[pid]['para']
+        sentence_span_hard = [self.map_dict[hardpid]['sentence'] for hardpid in hardpids]
+        para_span_hard = [self.map_dict[hardpid]['para'] for hardpid in hardpids]
+        sentence_score = self.hierarchical_score[pid]['sentence']
+        para_score = self.hierarchical_score[pid]['para']
+        sentence_score_hn = [self.hierarchical_score[hardpid]['sentence'] for hardpid in hardpids]
+        para_score_hn = [self.hierarchical_score[hardpid]['para'] for hardpid in hardpids]
+        passage_graph = build_graph(self.map_dict[pid])
+        hardneg_graph = [build_graph(self.map_dict[hardpid]) for hardpid in hardpids]
+        return query_data, passage_data, hard_passage_data, sentence_span_passage, sentence_span_hard, para_span_passage, para_span_hard, \
+               sentence_score, sentence_score_hn, para_score, para_score_hn, passage_graph, hardneg_graph
 
 class TrainInbatchWithRandDataset(TrainInbatchDataset):
     def __init__(self, rel_file, queryids_cache, 
@@ -184,8 +189,8 @@ class TrainInbatchWithRandDataset(TrainInbatchDataset):
         passage_data = self.doc_dataset[pid]
         randpids = random.sample(range(len(self.doc_dataset)), self.rand_num)
         rand_passage_data = [self.doc_dataset[randpid] for randpid in randpids]
-        return query_data, passage_data, rand_passage_data
 
+        return query_data, passage_data, rand_passage_data
 
 def single_get_collate_function(max_seq_length, padding=False):
     cnt = 0
@@ -208,7 +213,6 @@ def single_get_collate_function(max_seq_length, padding=False):
         return data, ids
     return collate_function  
 
-
 def dual_get_collate_function(max_query_length, max_doc_length, rel_dict, padding=False):
     query_collate_func = single_get_collate_function(max_query_length, padding)
     doc_collate_func = single_get_collate_function(max_doc_length, padding)
@@ -228,7 +232,6 @@ def dual_get_collate_function(max_query_length, max_doc_length, rel_dict, paddin
             }
         return input_data
     return collate_function  
-
 
 def triple_get_collate_function(max_query_length, max_doc_length, rel_dict, padding=False):
     query_collate_func = single_get_collate_function(max_query_length, padding)
@@ -257,4 +260,25 @@ def triple_get_collate_function(max_query_length, max_doc_length, rel_dict, padd
             "hard_pair_mask":torch.FloatTensor(hard_pair_mask),
             }
         return input_data
-    return collate_function  
+    return collate_function
+
+def build_graph(doc_tree):
+    #build document trees in bfs way.
+    doc_nums = 1
+    para_nums = len(doc_tree['para'])
+    sentence_nums = len(doc_tree['sentence'])
+    all_nodes = doc_nums + para_nums + sentence_nums
+    sentence_para_mask, sentence_doc_mask, para_doc_mask = [[0 for i in range(all_nodes)] for j in range(all_nodes)], [[0 for i in range(all_nodes)] for j in range(all_nodes)], \
+                                                           [[0 for i in range(all_nodes)] for j in range(all_nodes)]
+    for para_idx, para_span in enumerate(doc_tree['para']):
+        para_doc_mask[doc_nums + para_idx][0] = 1
+        para_doc_mask[0][doc_nums + para_idxs] = 1
+    for sent_idx, sent_span in enumerate(doc_tree['sentence']):
+        sentence_doc_mask[sent_idx + doc_nums + para_nums][0] = 1
+        sentence_doc_mask[0][sent_idx + doc_nums + para_nums] = 1
+        for para_idx, para_span in doc_tree:
+            if (sent_span[1] - para_span[0]) * (para_span[1] - sent_span[0]) > 0:
+                sentence_para_mask[sent_idx + doc_nums + para_nums][doc_nums + para_idx] = 1
+                sentence_para_mask[doc_nums + para_idx][sent_idx + doc_nums + para_nums] = 1
+    return sentence_doc_mask, para_doc_mask, sentence_para_mask
+

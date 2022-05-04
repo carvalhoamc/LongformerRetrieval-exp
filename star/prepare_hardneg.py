@@ -20,7 +20,6 @@ from retrieve_utils import (
 from star.inference import doc_inference, query_inference
 logger = logging.Logger(__name__)
 
-
 def retrieve_top(args):
     config = RobertaConfig.from_pretrained(args.model_path, gradient_checkpointing=False)
     model = RobertaDot.from_pretrained(args.model_path, config=config)
@@ -49,13 +48,14 @@ def retrieve_top(args):
         index = convert_index_to_gpu(index, list(range(args.n_gpu)), False)
     else:
         faiss.omp_set_num_threads(32)
-    nearest_neighbors = index_retrieve(index, query_embeddings, args.topk + 10, batch=320)
+    nearest_neighbors, scores = index_retrieve(index, query_embeddings, args.topk + 10, batch=320)
 
     with open(args.output_rank_file, 'w') as outputfile:
-        for qid, neighbors in zip(query_ids, nearest_neighbors):
-            for idx, pid in enumerate(neighbors):
-                outputfile.write(f"{qid}\t{pid}\t{idx+1}\n")
-
+        for qid, neighbors, batch_scores in zip(query_ids, nearest_neighbors, scores):
+            idx = 0
+            for pid, score in zip(neighbors, batch_scores):
+                outputfile.write(f"{qid}\t{pid}\t{idx+1}\t{score}\n")
+                idx += 1
 
 def gen_static_hardnegs(args):
     rank_dict = load_rank(args.output_rank_file)
@@ -64,35 +64,35 @@ def gen_static_hardnegs(args):
     for k in tqdm(query_ids_set, desc="gen hard negs"): 
         v = rank_dict[k]
         v = list(filter(lambda x:x not in rel_dict[k], v))
-        v = v[:args.topk]
+        v = v[:args.topk                                                                                                                         ]
         assert len(v) == args.topk
         rank_dict[k] = v
     json.dump(rank_dict, open(args.output_hard_path, 'w'))
 
-
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--data_type", choices=["passage", 'doc'], type=str, required=True)
-    parser.add_argument("--max_query_length", type=int, default=64)
-    parser.add_argument("--max_doc_length", type=int, default=4096)
-    parser.add_argument("--eval_batch_size", type=int, default=16)
+    parser.add_argument("--max_query_length", type=int, default=24)
+    parser.add_argument("--max_doc_length", type=int, default=512)
+    parser.add_argument("--eval_batch_size", type=int, default=128)
     parser.add_argument("--mode", type=str, choices=["train", "dev", "test", "lead"], required=True)
-    parser.add_argument("--topk", type=int, default=200)
+    parser.add_argument("--topk", type=int, default=100)
     parser.add_argument("--not_faiss_cuda", action="store_true")
+    parser.add_argument("--output_dir", type=str, required=True)
+    parser.add_argument("--model_path", type=str,required=True)
+    parser.add_argument("--doc_type", type=str, required=True)
+    parser.add_argument("--preprocess_dir", type =str, required=True)
+
     args = parser.parse_args()
 
     args.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     args.n_gpu = torch.cuda.device_count()
-    
-    args.preprocess_dir = f"./data/{args.data_type}/preprocess"
-    args.model_path = f"./data/{args.data_type}/warmup"
-    args.output_dir = f"./data/{args.data_type}/warmup_retrieve"
     args.label_path = os.path.join(args.preprocess_dir, f"{args.mode}-qrel.tsv")
 
     args.query_memmap_path = os.path.join(args.output_dir, f"{args.mode}-query.memmap")
     args.queryids_memmap_path = os.path.join(args.output_dir, f"{args.mode}-query-id.memmap")
-    args.doc_memmap_path = os.path.join(args.output_dir, "passages.memmap")
-    args.docid_memmap_path = os.path.join(args.output_dir, "passages-id.memmap")
+    args.doc_memmap_path = os.path.join(args.output_dir, f"{args.doc_type}.memmap")
+    args.docid_memmap_path = os.path.join(args.output_dir, f"{args.doc_type}-id.memmap")
 
     args.output_rank_file = os.path.join(args.output_dir, f"{args.mode}.rank.tsv")
     args.output_hard_path = os.path.join(args.output_dir, "hard.json")
@@ -101,7 +101,8 @@ if __name__ == "__main__":
     os.makedirs(args.output_dir, exist_ok=True)
 
     retrieve_top(args)
-    gen_static_hardnegs(args)
+    if args.doc_type == "passage":
+        gen_static_hardnegs(args)
     
-    results = subprocess.check_output(["python", "msmarco_eval.py", args.label_path, args.output_rank_file])
-    print(results)
+        results = subprocess.check_output(["python", "msmarco_eval.py", args.label_path, args.output_rank_file])
+        print(results)

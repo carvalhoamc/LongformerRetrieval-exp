@@ -1,5 +1,3 @@
-# coding=utf-8
-import imp
 import sys
 sys.path.append("./")
 import logging
@@ -7,13 +5,14 @@ import os
 from dataclasses import dataclass, field
 import transformers
 from transformers import (
-    LongformerConfig,
+    LongformerConfig,RobertaConfig,
     HfArgumentParser,
     TrainingArguments,
     set_seed,
 )
+import torch.nn as nn
 from transformers.integrations import TensorBoardCallback
-from model import (LongformerDot_InBatch, LongformerDot_Rand)
+from model import (LongformerDot_InBatch, LongformerDot_Rand,RobertaDot_InBatch,RobertaDot_Rand)
 from dataset import TextTokenIdsCache, load_rel
 from dataset import (
     TrainInbatchDataset, 
@@ -23,7 +22,7 @@ from dataset import (
     dual_get_collate_function
 )
 from torch.utils.tensorboard import SummaryWriter
-
+#from torch.nn import nn
 from transformers import (
     Trainer, 
     TrainerCallback, 
@@ -31,11 +30,11 @@ from transformers import (
     TrainerState, 
     TrainerControl
     )
-from transformers import AdamW, get_linear_schedule_with_warmup, LongformerTokenizer
+from transformers import AdamW, get_linear_schedule_with_warmup, LongformerTokenizer,RobertaTokenizer
+#from star_tokenizer import RobertaTokenizer
 from lamb import Lamb
-
+#os.environ["CUDA_VISIBLE_DEVICES"]="0,1"
 logger = logging.Logger(__name__)
-
 
 class MyTrainerCallback(TrainerCallback):
     def on_epoch_end(self, args: TrainingArguments, state: TrainerState, control: TrainerControl, **kwargs):
@@ -43,7 +42,6 @@ class MyTrainerCallback(TrainerCallback):
         Event called at the end of an epoch.
         """
         control.should_save = True
-
 
 class DRTrainer(Trainer):
 
@@ -85,16 +83,13 @@ class DRTrainer(Trainer):
             self.lr_scheduler = get_linear_schedule_with_warmup(
                 self.optimizer, num_warmup_steps=self.args.warmup_steps, num_training_steps=num_training_steps
             )
-    
 
 class MyTensorBoardCallback(TensorBoardCallback):
     def on_train_begin(self, args, state, control, **kwargs):
         pass
 
-
 def is_main_process(local_rank):
     return local_rank in [-1, 0]
-
 
 @dataclass
 class DataTrainingArguments:
@@ -103,12 +98,10 @@ class DataTrainingArguments:
     preprocess_dir: str = field() # "./data/passage or doc/preprocess"
     hardneg_path: str = field() # use prepare_hardneg.py to generate
 
-
 @dataclass
 class ModelArguments:
     init_path: str = field()
-    gradient_checkpointing: bool = field(default=False)
-
+    #gradient_checkpointing: bool = field(default=False)
 
 @dataclass
 class MyTrainingArguments(TrainingArguments):
@@ -138,8 +131,8 @@ class MyTrainingArguments(TrainingArguments):
     warmup_steps: int = field(default=1000, metadata={"help": "Linear warmup over warmup_steps."})
 
     logging_first_step: bool = field(default=False, metadata={"help": "Log and eval the first global_step"})
-    logging_steps: int = field(default=50, metadata={"help": "Log every X updates steps."})
-    save_steps: int = field(default=99999999999, metadata={"help": "Save checkpoint every X updates steps."})
+    logging_steps: int = field(default=500, metadata={"help": "Log every X updates steps."})
+    save_steps: int = field(default=10000, metadata={"help": "Save checkpoint every X updates steps."})
     
     no_cuda: bool = field(default=False, metadata={"help": "Do not use CUDA even when it is available"})
     seed: int = field(default=42, metadata={"help": "random seed for initialization"})
@@ -160,9 +153,9 @@ def main():
         and os.listdir(training_args.output_dir)
         and training_args.do_train
         and not training_args.overwrite_output_dir
-    ):
+        ):
         raise ValueError(
-            f"Output directory ({training_args.output_dir}) already exists and is not empty. "
+        "Output directory ({training_args.output_dir}) already exists and is not empty. "
             "Use --overwrite_output_dir to overcome."
         )
 
@@ -186,21 +179,25 @@ def main():
     # Set seed before initializing model.
     set_seed(training_args.seed)
 
-    config = LongformerConfig.from_pretrained(
+    config = RobertaConfig.from_pretrained(
         model_args.init_path,
+        finetuning_task="msmarco",
+        gradient_checkpointing=True
     )
 
-    tokenizer = LongformerTokenizer.from_pretrained(
+    tokenizer = RobertaTokenizer.from_pretrained(
         model_args.init_path,
         use_fast=False,
     )
-    # config.gradient_checkpointing = model_args.gradient_checkpointing
+#    config.gradient_checkpointing = model_args.gradient_checkpointing
     
     data_args.label_path = os.path.join(data_args.preprocess_dir, "train-qrel.tsv")
     rel_dict = load_rel(data_args.label_path)
+    data_args.map_path = os.path.join(data_args.preprocess_dir, "train-map.json")
     train_dataset = TrainInbatchWithHardDataset(
         rel_file=data_args.label_path,
         rank_file=data_args.hardneg_path,
+        map_file = data_args.map_file,
         queryids_cache=TextTokenIdsCache(data_dir=data_args.preprocess_dir, prefix="train-query"),
         docids_cache=TextTokenIdsCache(data_dir=data_args.preprocess_dir, prefix="passages"),
         max_query_length=data_args.max_query_length,
@@ -210,14 +207,15 @@ def main():
     data_collator = triple_get_collate_function(
         data_args.max_query_length, data_args.max_doc_length,
         rel_dict=rel_dict, padding=training_args.padding)
-    model_class = LongformerDot_InBatch
+    model_class = RobertaDot_InBatch
 
     model = model_class.from_pretrained(
         model_args.init_path,
         config=config,
     )
-    
-    # Initialize our Trainer
+
+    model = nn.DataParallel(model, device_ids=[0,1,2,3])
+    # Initialize our Trainer)
     trainer = DRTrainer(
         model=model,
         args=training_args,
@@ -236,11 +234,9 @@ def main():
     trainer.train()
     trainer.save_model()  # Saves the tokenizer too for easy upload
 
-
 def _mp_fn(index):
     # For xla_spawn (TPUs)
     main()
-
 
 if __name__ == "__main__":
     main()

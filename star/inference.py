@@ -8,12 +8,12 @@ import logging
 import os
 import numpy as np
 import torch
-from transformers import RobertaConfig
+from transformers import LongformerConfig, RobertaConfig
 from tqdm import tqdm
 from torch.utils.data.dataloader import DataLoader
 from torch.utils.data.sampler import SequentialSampler
 
-from model import RobertaDot
+from model import LongformerDot,RobertaDot
 from dataset import (
     TextTokenIdsCache, load_rel, SubsetSeqDataset, SequenceDataset,
     single_get_collate_function
@@ -22,8 +22,8 @@ from retrieve_utils import (
     construct_flatindex_from_embeddings, 
     index_retrieve, convert_index_to_gpu
 )
+os.environ["CUDA_VISIBLE_DEVICES"]="0,1"
 logger = logging.Logger(__name__)
-
 
 def prediction(model, data_collator, args, test_dataset, embedding_memmap, ids_memmap, is_query):
     os.makedirs(args.output_dir, exist_ok=True)
@@ -113,20 +113,24 @@ def main():
     parser.add_argument("--data_type", choices=["passage", 'doc'], type=str, required=True)
     parser.add_argument("--max_query_length", type=int, default=32)
     parser.add_argument("--max_doc_length", type=int, default=512)
-    parser.add_argument("--eval_batch_size", type=int, default=32)
+    parser.add_argument("--eval_batch_size", type=int, default=64)
     parser.add_argument("--mode", type=str, choices=["train", "dev", "test", "lead"], required=True)
     parser.add_argument("--topk", type=int, default=100)
     parser.add_argument("--no_cuda", action="store_true")
     parser.add_argument("--faiss_gpus", type=int, default=None, nargs="+")
+    parser.add_argument("--model_path", type=str, required=True)
+    parser.add_argument("--output_dir", type=str, required=True)
+   #parser.add_argument("")
+    #parser.add_argument("--device", type=str, default="cuda:0")
     args = parser.parse_args()
 
     args.device = torch.device(
         "cuda" if torch.cuda.is_available() and not args.no_cuda else "cpu")
     args.n_gpu = torch.cuda.device_count()
     
-    args.preprocess_dir = f"./data/{args.data_type}/preprocess"
-    args.model_path = f"./data/{args.data_type}/trained_models/star"
-    args.output_dir = f"./data/{args.data_type}/evaluate/star"
+    args.preprocess_dir = f"./data/{args.data_type}/ropreprocess_revisit"
+    #args.model_path = f"./data/passage/star_train/models/"
+    #args.output_dir = f"./data/{args.data_type}/evaluate/passage_warm_roberta"
     args.query_memmap_path = os.path.join(args.output_dir, f"{args.mode}-query.memmap")
     args.queryids_memmap_path = os.path.join(args.output_dir, f"{args.mode}-query-id.memmap")
     args.output_rank_file = os.path.join(args.output_dir, f"{args.mode}.rank.tsv")
@@ -135,7 +139,7 @@ def main():
     logger.info(args)
     os.makedirs(args.output_dir, exist_ok=True)
 
-    config = RobertaConfig.from_pretrained(args.model_path, gradient_checkpointing=False)
+    config = RobertaConfig.from_pretrained(args.model_path)
     model = RobertaDot.from_pretrained(args.model_path, config=config)
     output_embedding_size = model.output_embedding_size
     model = model.to(args.device)
@@ -162,13 +166,12 @@ def main():
         index = convert_index_to_gpu(index, args.faiss_gpus, False)
     else:
         faiss.omp_set_num_threads(32)
-    nearest_neighbors = index_retrieve(index, query_embeddings, args.topk, batch=32)
+    nearest_neighbors, scores = index_retrieve(index, query_embeddings, args.topk, batch=32)
 
     with open(args.output_rank_file, 'w') as outputfile:
         for qid, neighbors in zip(query_ids, nearest_neighbors):
             for idx, pid in enumerate(neighbors):
                 outputfile.write(f"{qid}\t{pid}\t{idx+1}\n")
-
 
 if __name__ == "__main__":
     main()

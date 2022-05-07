@@ -27,7 +27,7 @@ python ./star/prepare_hard.py --document_model ${warmup_model_path} --paragraph_
 ```
 Then, we train the multi-vector document-level dense retriever with following hyperparameters:
 ```
-python ./star/train.py --preprocess_dir ${preprocess_dir} --hardneg_path ${hardneg_path} --warmup_model #{warmup_model_path} --GAT_type RGAT
+python ./star/train.py --preprocess_dir ${preprocess_dir} --hardneg_path ${hardneg_path} --warmup_model #{warmup_model_path} --gat_type RGAT
 --do_train --optimizer_str adamw --learning_rate 2e-6 --gat_learning_rate 2e-3 --output_dir #{output_model_path}
 ```
 
